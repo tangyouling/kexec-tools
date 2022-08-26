@@ -33,11 +33,6 @@
 #include "mem_regions.h"
 #include "arch/options.h"
 
-#define ROOT_NODE_ADDR_CELLS_DEFAULT 1
-#define ROOT_NODE_SIZE_CELLS_DEFAULT 1
-
-#define PROP_ADDR_CELLS "#address-cells"
-#define PROP_SIZE_CELLS "#size-cells"
 #define PROP_ELFCOREHDR "linux,elfcorehdr"
 #define PROP_USABLE_MEM_RANGE "linux,usable-memory-range"
 
@@ -262,114 +257,6 @@ static int read_1st_dtb(struct dtb *dtb)
 on_success:
 	dbgprintf("%s: found %s\n", __func__, dtb->path);
 	return 0;
-}
-
-static int get_cells_size(void *fdt, uint32_t *address_cells,
-						uint32_t *size_cells)
-{
-	int nodeoffset;
-	const uint32_t *prop = NULL;
-	int prop_len;
-
-	/* default values */
-	*address_cells = ROOT_NODE_ADDR_CELLS_DEFAULT;
-	*size_cells = ROOT_NODE_SIZE_CELLS_DEFAULT;
-
-	/* under root node */
-	nodeoffset = fdt_path_offset(fdt, "/");
-	if (nodeoffset < 0)
-		goto on_error;
-
-	prop = fdt_getprop(fdt, nodeoffset, PROP_ADDR_CELLS, &prop_len);
-	if (prop) {
-		if (prop_len == sizeof(*prop))
-			*address_cells = fdt32_to_cpu(*prop);
-		else
-			goto on_error;
-	}
-
-	prop = fdt_getprop(fdt, nodeoffset, PROP_SIZE_CELLS, &prop_len);
-	if (prop) {
-		if (prop_len == sizeof(*prop))
-			*size_cells = fdt32_to_cpu(*prop);
-		else
-			goto on_error;
-	}
-
-	dbgprintf("%s: #address-cells:%d #size-cells:%d\n", __func__,
-			*address_cells, *size_cells);
-	return 0;
-
-on_error:
-	return EFAILED;
-}
-
-static bool cells_size_fitted(uint32_t address_cells, uint32_t size_cells,
-						struct memory_range *range)
-{
-	dbgprintf("%s: %llx-%llx\n", __func__, range->start, range->end);
-
-	/* if *_cells >= 2, cells can hold 64-bit values anyway */
-	if ((address_cells == 1) && (range->start >= (1ULL << 32)))
-		return false;
-
-	if ((size_cells == 1) &&
-			((range->end - range->start + 1) >= (1ULL << 32)))
-		return false;
-
-	return true;
-}
-
-static void fill_property(void *buf, uint64_t val, uint32_t cells)
-{
-	uint32_t val32;
-	int i;
-
-	if (cells == 1) {
-		val32 = cpu_to_fdt32((uint32_t)val);
-		memcpy(buf, &val32, sizeof(uint32_t));
-	} else {
-		for (i = 0;
-		     i < (cells * sizeof(uint32_t) - sizeof(uint64_t)); i++)
-			*(char *)buf++ = 0;
-
-		val = cpu_to_fdt64(val);
-		memcpy(buf, &val, sizeof(uint64_t));
-	}
-}
-
-static int fdt_setprop_ranges(void *fdt, int nodeoffset, const char *name,
-				struct memory_range *ranges, int nr_ranges, bool reverse,
-				uint32_t address_cells, uint32_t size_cells)
-{
-	void *buf, *prop;
-	size_t buf_size;
-	int i, result;
-	struct memory_range *range;
-
-	buf_size = (address_cells + size_cells) * sizeof(uint32_t) * nr_ranges;
-	prop = buf = xmalloc(buf_size);
-	if (!buf)
-		return -ENOMEM;
-
-	for (i = 0; i < nr_ranges; i++) {
-		if (reverse)
-			range = ranges + (nr_ranges - 1 - i);
-		else
-			range = ranges + i;
-
-		fill_property(prop, range->start, address_cells);
-		prop += address_cells * sizeof(uint32_t);
-
-		fill_property(prop, range->end - range->start + 1, size_cells);
-		prop += size_cells * sizeof(uint32_t);
-	}
-
-	result = fdt_setprop(fdt, nodeoffset, name, buf, buf_size);
-
-	free(buf);
-
-	return result;
 }
 
 /*
