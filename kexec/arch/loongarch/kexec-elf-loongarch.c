@@ -74,10 +74,10 @@ int elf_loongarch_load(int argc, char **argv, const char *kernel_buf,
 	}
 
 	dbgprintf("%s: kernel_segment: %016lx\n", __func__, kernel_segment);
-	dbgprintf("%s: text_offset:    %016lx\n", __func__,
-		loongarch_mem.text_offset);
 	dbgprintf("%s: image_size:     %016lx\n", __func__,
 		kernel_size);
+	dbgprintf("%s: text_offset:    %016lx\n", __func__,
+		loongarch_mem.text_offset);
 	dbgprintf("%s: phys_offset:    %016lx\n", __func__,
 		loongarch_mem.phys_offset);
 	dbgprintf("%s: PE format:      %s\n", __func__,

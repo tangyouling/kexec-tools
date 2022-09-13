@@ -12,25 +12,23 @@
  * struct loongarch_image_header
  *
  * @pe_sig: Optional PE format 'MZ' signature.
- * @branch_code: Reserved.
- * @text_offset: The image load offset in LSB byte order.
- * @image_size: An estimated size of the memory image size in LSB byte order.
- * @flags: Reserved.
+ * @reserved_1: Reserved.
  * @kernel_entry: Kernel image entry pointer.
- * @reserved: Reserved.
- * @magic: Reserved.
+ * @image_size: An estimated size of the memory image size in LSB byte order.
+ * @text_offset: The image load offset in LSB byte order.
+ * @reserved_2: Reserved.
+ * @reserved_3: Reserved.
  * @pe_header: Optional offset to a PE format header.
  **/
 
 struct loongarch_image_header {
 	uint8_t pe_sig[2];
-	uint16_t branch_code[3];
-	uint64_t text_offset;
-	uint64_t image_size;
-	uint64_t flags;
+	uint16_t reserved_1[3];
 	uint64_t kernel_entry;
-	uint64_t reserved[2];
-	uint8_t magic[4];
+	uint64_t image_size;
+	uint64_t text_offset;
+	uint64_t reserved_2[3];
+	uint32_t reserved_3;
 	uint32_t pe_header;
 };
 

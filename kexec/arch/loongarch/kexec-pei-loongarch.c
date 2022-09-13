@@ -67,11 +67,11 @@ int pei_loongarch_load(int argc, char **argv, const char *buf,
 	kernel_entry = virt_to_phys(loongarch_header_kernel_entry(header));
 
 	dbgprintf("%s: kernel_segment: %016lx\n", __func__, kernel_segment);
-	dbgprintf("%s: text_offset:    %016lx\n", __func__,
-		loongarch_mem.text_offset);
+	dbgprintf("%s: kernel_entry:   %016lx\n", __func__, kernel_entry);
 	dbgprintf("%s: image_size:     %016lx\n", __func__,
 		loongarch_mem.image_size);
-	dbgprintf("%s: kernel_entry:   %016lx\n", __func__, kernel_entry);
+	dbgprintf("%s: text_offset:    %016lx\n", __func__,
+		loongarch_mem.text_offset);
 	dbgprintf("%s: PE format:      %s\n", __func__,
 		(loongarch_header_check_pe_sig(header) ? "yes" : "no"));
 
