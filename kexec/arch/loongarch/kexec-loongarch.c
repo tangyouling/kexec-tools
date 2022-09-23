@@ -36,6 +36,85 @@
 #define PROP_ELFCOREHDR "linux,elfcorehdr"
 #define PROP_USABLE_MEM_RANGE "linux,usable-memory-range"
 
+#define CMDLINE_PREFIX "kexec "
+static char cmdline[COMMAND_LINE_SIZE] = CMDLINE_PREFIX;
+
+/* Adds "initrd=start,size" parameters to command line. */
+static int cmdline_add_initrd(char *cmdline, unsigned long addr,
+		unsigned long size)
+{
+	int cmdlen, len;
+	char str[50], *ptr;
+
+	ptr = str;
+	strcpy(str, " initrd=");
+	ptr += strlen(str);
+	ultoa(addr, ptr);
+	strcat(str, ",");
+	ptr = str + strlen(str);
+	ultoa(size, ptr);
+	len = strlen(str);
+	cmdlen = strlen(cmdline) + len;
+	if (cmdlen > (COMMAND_LINE_SIZE - 1))
+		die("Command line overflow\n");
+	strcat(cmdline, str);
+
+	return 0;
+}
+
+/* Adds the appropriate "mem=size@start" options to command line, indicating the
+ * memory region the new kernel can use to boot into. */
+static int cmdline_add_mem(char *cmdline, unsigned long addr,
+		unsigned long size)
+{
+	int cmdlen, len;
+	char str[50], *ptr;
+
+	addr = addr/1024;
+	size = size/1024;
+	ptr = str;
+	strcpy(str, " mem=");
+	ptr += strlen(str);
+	ultoa(size, ptr);
+	strcat(str, "K@");
+	ptr = str + strlen(str);
+	ultoa(addr, ptr);
+	strcat(str, "K");
+	len = strlen(str);
+	cmdlen = strlen(cmdline) + len;
+	if (cmdlen > (COMMAND_LINE_SIZE - 1))
+		die("Command line overflow\n");
+	strcat(cmdline, str);
+
+	return 0;
+}
+
+/* Adds the "elfcorehdr=size@start" command line parameter to command line. */
+static int cmdline_add_elfcorehdr(char *cmdline, unsigned long addr,
+			unsigned long size)
+{
+	int cmdlen, len;
+	char str[50], *ptr;
+
+	addr = addr/1024;
+	size = size/1024;
+	ptr = str;
+	strcpy(str, " elfcorehdr=");
+	ptr += strlen(str);
+	ultoa(size, ptr);
+	strcat(str, "K@");
+	ptr = str + strlen(str);
+	ultoa(addr, ptr);
+	strcat(str, "K");
+	len = strlen(str);
+	cmdlen = strlen(cmdline) + len;
+	if (cmdlen > (COMMAND_LINE_SIZE - 1))
+		die("Command line overflow\n");
+	strcat(cmdline, str);
+
+	return 0;
+}
+
 /* Return a sorted list of memory ranges. */
 static struct memory_range memory_range[MAX_MEMORY_RANGES];
 
@@ -176,199 +255,6 @@ const struct arch_map_entry arches[] = {
 	{ NULL, 0 },
 };
 
-/*
- * struct dtb - Info about a binary device tree.
- *
- * @buf: Device tree data.
- * @size: Device tree data size.
- * @name: Shorthand name of this dtb for messages.
- * @path: Filesystem path.
- */
-
-struct dtb {
-	char *buf;
-	off_t size;
-	const char *name;
-	const char *path;
-};
-
-/*
- * set_bootargs - Set the dtb's bootargs.
- */
-
-static int set_bootargs(struct dtb *dtb, const char *command_line)
-{
-	int result;
-
-	if (!command_line || !command_line[0])
-		return 0;
-
-	result = dtb_set_bootargs(&dtb->buf, &dtb->size, command_line);
-
-	if (result) {
-		fprintf(stderr,
-			"kexec: Set device tree bootargs failed.\n");
-		return EFAILED;
-	}
-
-	return 0;
-}
-
-/*
- * read_sys_dtb - Read /sys/firmware/fdt.
- */
-
-static int read_sys_dtb(struct dtb *dtb)
-{
-	int result;
-	struct stat s;
-	static const char path[] = "/sys/firmware/fdt";
-
-	result = stat(path, &s);
-
-	if (result) {
-		dbgprintf("%s: %s\n", __func__, strerror(errno));
-		return EFAILED;
-	}
-
-	dtb->path = path;
-	dtb->buf = slurp_file(path, &dtb->size);
-
-	return 0;
-}
-
-/*
- * read_1st_dtb - Read the 1st stage kernel's dtb.
- */
-
-static int read_1st_dtb(struct dtb *dtb)
-{
-	int result;
-
-	dtb->name = "dtb_sys";
-	result = read_sys_dtb(dtb);
-
-	if (!result)
-		goto on_success;
-
-	dbgprintf("%s: not found\n", __func__);
-	return EFAILED;
-
-on_success:
-	dbgprintf("%s: found %s\n", __func__, dtb->path);
-	return 0;
-}
-
-/*
- * setup_2nd_dtb - Setup the 2nd stage kernel's dtb.
- */
-
-static int setup_2nd_dtb(struct dtb *dtb, char *command_line, int on_crash)
-{
-	uint32_t address_cells, size_cells;
-	char *new_buf = NULL;
-	int range_len;
-	int nodeoffset;
-	int new_size;
-	int i, result;
-
-	result = fdt_check_header(dtb->buf);
-
-	if (result) {
-		fprintf(stderr, "kexec: Invalid 2nd device tree.\n");
-		return EFAILED;
-	}
-
-	result = set_bootargs(dtb, command_line);
-	if (result) {
-		fprintf(stderr, "kexec: cannot set bootargs.\n");
-		result = -EINVAL;
-		goto on_error;
-	}
-
-	/* determine #address-cells and #size-cells */
-	result = get_cells_size(dtb->buf, &address_cells, &size_cells);
-	if (result) {
-		fprintf(stderr, "kexec: cannot determine cells-size.\n");
-		result = -EINVAL;
-		goto on_error;
-	}
-
-	if (!cells_size_fitted(address_cells, size_cells,
-				&elfcorehdr_mem)) {
-		fprintf(stderr, "kexec: elfcorehdr doesn't fit cells-size.\n");
-		result = -EINVAL;
-		goto on_error;
-	}
-
-	for (i = 0; i < usablemem_rgns.size; i++) {
-		if (!cells_size_fitted(address_cells, size_cells,
-					&crash_reserved_mem[i])) {
-			fprintf(stderr, "kexec: usable memory range doesn't fit cells-size.\n");
-			result = -EINVAL;
-			goto on_error;
-		}
-	}
-
-	/* duplicate dt blob */
-	range_len = sizeof(uint32_t) * (address_cells + size_cells);
-	new_size = fdt_totalsize(dtb->buf)
-		+ fdt_prop_len(PROP_ELFCOREHDR, range_len)
-		+ fdt_prop_len(PROP_USABLE_MEM_RANGE, range_len * usablemem_rgns.size);
-
-	new_buf = xmalloc(new_size);
-	result = fdt_open_into(dtb->buf, new_buf, new_size);
-	if (result) {
-		dbgprintf("%s: fdt_open_into failed: %s\n", __func__,
-				fdt_strerror(result));
-		result = -ENOSPC;
-		goto on_error;
-	}
-
-	if (on_crash) {
-		/* add linux,elfcorehdr */
-		nodeoffset = fdt_path_offset(new_buf, "/chosen");
-		result = fdt_setprop_ranges(new_buf, nodeoffset,
-				PROP_ELFCOREHDR, &elfcorehdr_mem, 1, false,
-				address_cells, size_cells);
-		if (result) {
-			dbgprintf("%s: fdt_setprop failed: %s\n", __func__,
-					fdt_strerror(result));
-			result = -EINVAL;
-			goto on_error;
-		}
-
-		/*
-		 * add linux,usable-memory-range
-		 *
-		 * crash dump kernel support one or two regions, to make
-		 * compatibility with existing user-space and older kdump, the
-		 * low region is always the last one.
-		 */
-		nodeoffset = fdt_path_offset(new_buf, "/chosen");
-		result = fdt_setprop_ranges(new_buf, nodeoffset,
-				PROP_USABLE_MEM_RANGE,
-				usablemem_rgns.ranges, usablemem_rgns.size, true,
-				address_cells, size_cells);
-		if (result) {
-			dbgprintf("%s: fdt_setprop failed: %s\n", __func__,
-					fdt_strerror(result));
-			result = -EINVAL;
-			goto on_error;
-		}
-	}
-
-	fdt_pack(new_buf);
-	dtb->buf = new_buf;
-	dtb->size = fdt_totalsize(new_buf);
-
-	return result;
-
-on_error:
-        fprintf(stderr, "kexec: %s failed.\n", __func__);
-        return result;
-}
-
 unsigned long loongarch_locate_kernel_segment(struct kexec_info *info)
 {
 	unsigned long hole;
@@ -404,44 +290,20 @@ unsigned long loongarch_locate_kernel_segment(struct kexec_info *info)
 
 int loongarch_load_other_segments(struct kexec_info *info, unsigned long hole_min)
 {
-	int result;
-	unsigned long dtb_base, initrd_min;
-	unsigned long hole_max;
+	unsigned long initrd_min, hole_max;
 	char *initrd_buf = NULL;
-	struct dtb dtb;
-	char command_line[COMMAND_LINE_SIZE] = "";
 	unsigned long pagesize = getpagesize();
 
 	if (arch_options.command_line) {
 		if (strlen(arch_options.command_line) >
-		    sizeof(command_line) - 1) {
+		    sizeof(cmdline) - 1) {
 			fprintf(stderr,
 				"Kernel command line too long for kernel!\n");
 			return EFAILED;
 		}
 
-		strncpy(command_line, arch_options.command_line,
-			sizeof(command_line) - 1);
-		command_line[sizeof(command_line) - 1] = 0;
+		strncat(cmdline, arch_options.command_line, sizeof(cmdline) - 1);
 	}
-
-	if (arch_options.dtb) {
-		dtb.name = "dtb_user";
-		dtb.buf = slurp_file(arch_options.dtb, &dtb.size);
-	} else {
-		result = read_1st_dtb(&dtb);
-
-		if (result) {
-			fprintf(stderr,
-				"kexec: Error: No device tree available.\n");
-			return EFAILED;
-		}
-	}
-
-	result = setup_2nd_dtb(&dtb, command_line,
-			       info->kexec_flags & KEXEC_ON_CRASH);
-	if (result)
-		return EFAILED;
 
 	/* Put the other segments after the image. */
 
@@ -461,25 +323,24 @@ int loongarch_load_other_segments(struct kexec_info *info, unsigned long hole_mi
 						pagesize), hole_max, 1);
 		dbgprintf("initrd_base: %lx, initrd_size: %lx\n", initrd_base, initrd_size);
 
-		result = dtb_set_initrd((char **)&dtb.buf, &dtb.size, initrd_base,
-				initrd_base + initrd_size);
-		if (result)
-			return EFAILED;
+		cmdline_add_initrd(cmdline, initrd_base, initrd_size);
 	}
 
-	/* Check size limit. */
-	if (dtb.size > KiB(64)) {
-		fprintf(stderr, "kexec: Error: dtb too big.\n");
-		return EFAILED;
+	if (info->kexec_flags & KEXEC_ON_CRASH) {
+		cmdline_add_elfcorehdr(cmdline, elfcorehdr_mem.start,
+				elfcorehdr_mem.end - elfcorehdr_mem.start + 1);
+
+		cmdline_add_mem(cmdline, crash_reserved_mem[usablemem_rgns.size - 1].start,
+			crash_reserved_mem[usablemem_rgns.size - 1].end -
+			crash_reserved_mem[usablemem_rgns.size - 1].start + 1);
 	}
 
-	dtb_base = add_buffer(info, dtb.buf, dtb.size, dtb.size,
+	cmdline[sizeof(cmdline) - 1] = 0;
+	add_buffer(info, cmdline, sizeof(cmdline), sizeof(cmdline),
 		sizeof(void *), _ALIGN_UP(hole_min, getpagesize()),
 		0xffffffff, 1);
 
-	/* dtb_base is valid if we got here. */
-	dbgprintf("dtb:    base %lx, size %lxh (%ld)\n", dtb_base, dtb.size,
-		dtb.size);
+	dbgprintf("%s:%d: command_line: %s\n", __func__, __LINE__, cmdline);
 
 	return 0;
 

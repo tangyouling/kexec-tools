@@ -1202,6 +1202,8 @@ char *get_command_line(void)
 		*p = '\0';
 
 	remove_parameter(line, "BOOT_IMAGE");
+	remove_parameter(line, "kexec");
+	remove_parameter(line, "initrd");
 	if (kexec_flags & KEXEC_ON_CRASH)
 		remove_parameter(line, "crashkernel");
 
