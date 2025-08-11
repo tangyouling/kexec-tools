@@ -56,6 +56,11 @@ int elf_loongarch_load(int argc, char **argv, const char *kernel_buf,
 	int result;
 	int i;
 
+	if (info->file_mode) {
+		fprintf(stderr,
+			"ELF executable is not supported in kexec_file\n");
+		return EFAILED;
+	}
 	result = build_elf_exec_info(kernel_buf, kernel_size, &ehdr, 0);
 
 	if (result < 0) {
